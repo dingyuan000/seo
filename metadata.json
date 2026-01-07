@@ -1,0 +1,7 @@
+{
+  "name": "Copy of SEO Sage Pro",
+  "description": "An AI-powered SEO analysis tool that provides comprehensive website audits, performance scoring, and actionable optimization recommendations.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
