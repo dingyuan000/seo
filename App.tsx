@@ -10,6 +10,7 @@ const App: React.FC = () => {
   const [url, setUrl] = useState('');
   const [competitorUrl, setCompetitorUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isObjectionLoading, setIsObjectionLoading] = useState(false);
   const [result, setResult] = useState<SEOAnalysisResult | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let interval: any;
-    if (isLoading) {
+    if (isLoading || isObjectionLoading) {
       let idx = 0;
       const currentMessages = loadingMessages[lang];
       setStatusMessage(currentMessages[0]);
@@ -48,10 +49,10 @@ const App: React.FC = () => {
       }, 3000);
     }
     return () => clearInterval(interval);
-  }, [isLoading, lang]);
+  }, [isLoading, isObjectionLoading, lang]);
 
-  const handleAudit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAudit = async (e?: React.FormEvent, objectionCode?: string) => {
+    if (e) e.preventDefault();
     if (!url) return;
 
     let formattedUrl = url.trim();
@@ -60,21 +61,32 @@ const App: React.FC = () => {
     let formattedComp = competitorUrl.trim();
     if (formattedComp && !formattedComp.startsWith('http')) formattedComp = 'https://' + formattedComp;
 
-    setIsLoading(true);
+    if (objectionCode) {
+      setIsObjectionLoading(true);
+    } else {
+      setIsLoading(true);
+    }
+    
     setError(null);
-    setResult(null);
-    setSources([]);
 
     try {
-      const response = await performSEOAnalysis(formattedUrl, formattedComp || null, lang);
+      const response = await performSEOAnalysis(formattedUrl, formattedComp || null, lang, objectionCode);
       setResult(response.data);
       setSources(response.sources);
+      if (objectionCode) {
+        alert(t.objectionSuccess);
+      }
     } catch (err: any) {
       console.error(err);
-      setError(lang === 'zh' ? "分析失败。由于复杂的对比请求，可能需要更多时间或请检查网址。" : "Audit failed. The complex comparison might have timed out or please check the URLs.");
+      setError(lang === 'zh' ? "分析失败。请检查网址或稍后重试。" : "Audit failed. Please check the URLs or try again later.");
     } finally {
       setIsLoading(false);
+      setIsObjectionLoading(false);
     }
+  };
+
+  const handleObjectionSubmit = (code: string) => {
+    handleAudit(undefined, code);
   };
 
   return (
@@ -138,7 +150,7 @@ const App: React.FC = () => {
           </button>
         </form>
 
-        {isLoading && (
+        {(isLoading || isObjectionLoading) && (
           <div className="mt-12">
             <div className="flex justify-center space-x-2 mb-4">
               <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
@@ -159,7 +171,13 @@ const App: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-6">
         {result ? (
-          <AnalysisView result={result} sources={sources} lang={lang} />
+          <AnalysisView 
+            result={result} 
+            sources={sources} 
+            lang={lang} 
+            onObjectionSubmit={handleObjectionSubmit}
+            isObjectionLoading={isObjectionLoading}
+          />
         ) : !isLoading && (
           <div className="py-20 grid grid-cols-1 md:grid-cols-3 gap-12 text-center opacity-40">
             <FeatureIcon title={t.technicalSeo} desc={t.technicalDesc} icon="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />

@@ -3,21 +3,63 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { SEOAnalysisResult } from "../types";
 import { Language } from "../translations";
 
-export const performSEOAnalysis = async (url: string, competitorUrl: string | null, lang: Language): Promise<{ data: SEOAnalysisResult; sources: any[] }> => {
+export const performSEOAnalysis = async (
+  url: string, 
+  competitorUrl: string | null, 
+  lang: Language,
+  objectionCode?: string
+): Promise<{ data: SEOAnalysisResult; sources: any[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const languageName = lang === 'zh' ? 'Chinese (Simplified)' : 'English';
 
   const prompt = `Perform a deep SEO audit for ${url}. ${competitorUrl ? `Compare it against ${competitorUrl}.` : ''}
   
-  For EACH SEO category (technical, content, mobile, links), you MUST provide:
-  1. findings: Array of issues or positive points.
-  2. evidenceSnippet: A block of simulated or detected HTML/Code structure that proves your finding (e.g. JSON-LD for FAQ, meta tags structure, or DOM hierarchy).
-  3. logicBasis: Explain the logic/SEO principle behind why this structure is good or bad.
+  ${objectionCode ? `
+  USER SOURCE CODE OBJECTION:
+  The user has provided the following specific source code snippet:
+  \`\`\`html
+  ${objectionCode}
+  \`\`\`
+  IMPORTANT: If this code contains schemas (like FAQPage or BreadcrumbList) that were previously missed, update the status to 'detected'.
+  ` : ''}
+
+  CRITICAL INSTRUCTIONS FOR SCHEMA & SOURCE CORRECTION:
+  1. **BreadcrumbList Schema**: 
+     - Check if a valid BreadcrumbList schema exists.
+     - If missing or invalid, generate a recommended JSON-LD BreadcrumbList snippet based on the URL structure of ${url}.
+     - Use standard schema.org properties (itemListElement, ListItem, position, name, item).
   
-  If a competitor is provided, provide a 'competitorComparison' object analyzing the score gap and specific advantages.
+  2. **FAQPage Schema**:
+     - Identify if the page contains FAQ content (questions and answers).
+     - Provide a recommended top-level FAQPage JSON-LD snippet.
+     - Ensure it follows the latest Google guidelines for rich results (mainEntity: Question -> acceptedAnswer: Answer).
+     - If FAQs are currently nested inside other schemas (like Product), explain why moving them to a top-level FAQPage is better for rich snippets.
+
+  3. **Structural Issues**:
+     - For any structural issues found (e.g., heading hierarchy, missing meta tags), provide a 'recommendedSnippet' in standard HTML or JSON-LD format.
+
+  For EACH SEO category (technical, content, mobile, links):
+  - evidenceSnippet: What you detected in the source.
+  - recommendedSnippet: Precise code to fix the issue.
+  - logicBasis: The SEO impact and reasoning behind the recommendation.
+
+  For the 'schemaAnalysis' object:
+  - primarySchemas: List the status of major schemas (Article, Product, BreadcrumbList, FAQPage, etc.). 
+  - ALWAYS include 'recommendedSnippet' for missing BreadcrumbList and FAQPage if applicable.
   
   All text responses must be in ${languageName}.
   `;
+
+  const schemaItemType = {
+    type: Type.OBJECT,
+    properties: {
+      type: { type: Type.STRING },
+      status: { type: Type.STRING, enum: ["detected", "missing", "warning"] },
+      details: { type: Type.STRING },
+      recommendedSnippet: { type: Type.STRING, description: "Corrected or missing Schema JSON-LD code" }
+    },
+    required: ["type", "status", "details"]
+  };
 
   const categorySchema = {
     type: Type.OBJECT,
@@ -26,8 +68,9 @@ export const performSEOAnalysis = async (url: string, competitorUrl: string | nu
       label: { type: Type.STRING },
       findings: { type: Type.ARRAY, items: { type: Type.STRING } },
       recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
-      evidenceSnippet: { type: Type.STRING, description: "Simulated HTML/Structure code snippet related to the analysis" },
-      logicBasis: { type: Type.STRING, description: "The underlying SEO logic for this finding" }
+      evidenceSnippet: { type: Type.STRING },
+      recommendedSnippet: { type: Type.STRING, description: "Corrected code snippet for the issue" },
+      logicBasis: { type: Type.STRING }
     },
     required: ["score", "label", "findings", "recommendations", "evidenceSnippet", "logicBasis"]
   };
@@ -62,6 +105,15 @@ export const performSEOAnalysis = async (url: string, competitorUrl: string | nu
             },
             required: ["technical", "content", "mobile", "links"]
           },
+          schemaAnalysis: {
+            type: Type.OBJECT,
+            properties: {
+              primarySchemas: { type: Type.ARRAY, items: schemaItemType },
+              competitorSchemas: { type: Type.ARRAY, items: schemaItemType },
+              comparisonSummary: { type: Type.STRING }
+            },
+            required: ["primarySchemas", "comparisonSummary"]
+          },
           summary: { type: Type.STRING },
           competitorComparison: {
             type: Type.OBJECT,
@@ -73,7 +125,7 @@ export const performSEOAnalysis = async (url: string, competitorUrl: string | nu
             }
           }
         },
-        required: ["overallScore", "url", "metadata", "categories", "summary"]
+        required: ["overallScore", "url", "metadata", "categories", "schemaAnalysis", "summary"]
       }
     }
   });
